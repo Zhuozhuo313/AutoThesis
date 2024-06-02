@@ -220,29 +220,65 @@ def main_loop(theme):
 def create_ui_and_launch():
     with gr.Blocks(title="论文生成器", theme=gr.themes.Soft()) as blocks:
         gr.Markdown("# 基于百度erniebot的论文生成器")
-
+        
         def _infer(
             theme, access_key, secret_key, access_token
         ):
+            global access_token_global, ak_global, sk_global
             access_key = access_key.strip()
             secret_key = secret_key.strip()
             access_token = access_token.strip()
-
+            history = []
             if (access_key == "" or secret_key == "") and access_token == "":
                 raise gr.Error("需要填写正确的AK/SK或access token，不能为空")
             if theme.strip() == "":
                 raise gr.Error("输入不能为空，请在清空后重试")
             
+            access_token_global = access_token
+            ak_global = access_key
+            sk_global = secret_key
+
+            state = STATE.init
+            thesis = {}
+            thesis_simple = {}
+            thesis_req = {}
+            rating = {}
+            images = {}
+            while state != STATE.done and state != STATE.failed:
+                print(state.name)
+                try:
+                    if state == STATE.init:
+                        state = STATE.gen_outline
+                    elif state == STATE.gen_outline:
+                        state, thesis_req, thesis = gen_outline(theme)
+                    elif state == STATE.gen_detail:
+                        state, thesis, thesis_simple = gen_detail(theme, thesis_req)
+                    elif state == STATE.rating:
+                        state, rating = gen_rating(theme, thesis)
+                    elif state == STATE.polish:
+                        state, thesis, thesis_simple = polish(theme, thesis, thesis_simple, rating)
+                    elif state == STATE.gen_images:
+                        state, thesis, images = gen_images(thesis)
+                except Exception as e:
+                    state = STATE.failed
+                    print(traceback.format_exc())
+                str_state = str(state)
+                str_thesis = str(thesis)
+                history.append((str_state,str_thesis))
+                yield state.name, history
+            yield state.name, history
+            # return thesis, images
+            
         with gr.Row():
             with gr.Column(scale=1):
                 access_key = gr.Textbox(
-                    label="AK", info="用于访问后端平台的AK", type="password"
+                    label="AK", info="yinian API的API Key", type="password"
                 )
                 secret_key = gr.Textbox(
-                    label="SK", info="用于访问后端平台的SK", type="password"
+                    label="SK", info="yinian API的Secret Key", type="password"
                 )
                 access_token = gr.Textbox(
-                    label="Access Token", info="用于访问后端平台的access token", type="password"
+                    label="Access Token", info="AI Studio的access token", type="password"
                 )
                 theme = gr.Textbox(label="论文主题", placeholder="请输入论文主题...")
             with gr.Column(scale=4):
@@ -259,62 +295,11 @@ def create_ui_and_launch():
                 access_token,
             ],
             outputs=[
-                theme,
                 progress_display,
                 output_text,
             ],
         )
     blocks.launch()
-
-
-        progress = []
-        def update_progress(progress_step):
-            progress.append(progress_step)
-            progress_text = "\n".join(progress)
-            progress_display.update(progress_text)
-            return progress_text
-
-        update_progress("初始化")
-        
-        state = STATE.init
-        thesis = {}
-        thesis_simple = {}
-        thesis_req = {}
-        rating = {}
-        images = {}
-
-        while state != STATE.done and state != STATE.failed:
-            if state == STATE.init:
-                state = STATE.gen_outline
-            elif state == STATE.gen_outline:
-                state, thesis_req, thesis = gen_outline(theme)
-                update_progress("生成大纲")
-            elif state == STATE.gen_detail:
-                state, thesis, thesis_simple = gen_detail(theme, thesis_req)
-                update_progress("生成详细内容")
-            elif state == STATE.rating:
-                state, rating = gen_rating(theme, thesis)
-                update_progress("生成评分")
-            elif state == STATE.polish:
-                state, thesis, thesis_simple = polish(theme, thesis, thesis_simple, rating)
-                update_progress("润色内容")
-            elif state == STATE.gen_images:
-                state, thesis, images = gen_images(thesis)
-                update_progress("生成配图")
-
-        document = Document()
-        for key, value in thesis.items():
-            document.add_heading(key, level=1)
-            document.add_paragraph(value)
-            if key in images:
-                for image_info in images[key]:
-                    document.add_picture(image_info[1])
-                    document.add_paragraph(image_info[0], style='Caption')
-
-        document.save(f"{theme}.docx")
-
-        update_progress("完成")
-        return theme, "\n".join(progress), json.dumps(thesis, ensure_ascii=False, indent=2)
 
 if __name__ == '__main__':
     '''thesis, images = main_loop('自然语言处理')
