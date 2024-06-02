@@ -5,7 +5,8 @@ import erniebot
 import unicodedata
 import gradio as gr
 from docx import Document
-import json
+import requests
+from docx.shared import Inches
 
 access_token_global = None
 ak_global = None
@@ -109,7 +110,7 @@ def gen_outline(theme: str) -> Tuple[STATE, Dict[str, str], Dict[str, str]]:
         assert '方法' in thesis_req.keys(), '方法'
         assert '结论' in thesis_req.keys(), '结论'
     except:
-        return STATE.init, {}
+        return STATE.init, {}, {}
     return STATE.gen_detail, thesis_req, thesis
 
 def gen_detail(theme: str, thesis_req: Dict[str, str]) -> Tuple[STATE, Dict[str, str], Dict[str, str]]:
@@ -217,6 +218,29 @@ def main_loop(theme):
 
     return thesis, images
 
+def download_image(url, filename):
+    response = requests.get(url)
+    with open(filename, 'wb') as file:
+        file.write(response.content)
+
+def create_word_document(thesis, images, filename="thesis.docx"):
+    doc = Document()
+    for key, value in thesis.items():
+        doc.add_heading(key, level=1)
+        paragraphs = value.split("\n\n")
+        for paragraph in paragraphs:
+            if paragraph.startswith("[插图："):
+                image_title = paragraph.replace("[插图：", "").replace("]\n", "")
+                for image_key, (title, url) in images.items():
+                    if title == image_title:
+                        image_path = f"images/{image_key}.jpg"
+                        download_image(url, image_path)
+                        doc.add_picture(image_path, width=Inches(5.0))
+                        break
+            else:
+                doc.add_paragraph(paragraph)
+    doc.save(filename)
+
 def create_ui_and_launch():
     with gr.Blocks(title="论文生成器", theme=gr.themes.Soft()) as blocks:
         gr.Markdown("# 基于百度erniebot的论文生成器")
@@ -262,12 +286,15 @@ def create_ui_and_launch():
                 except Exception as e:
                     state = STATE.failed
                     print(traceback.format_exc())
-                str_state = str(state)
+                str_state = str(state.name)
                 str_thesis = str(thesis)
                 history.append((str_state,str_thesis))
-                yield state, history
-            yield state, history
-            # return thesis, images
+                yield str_state, history, None
+            if state == STATE.done:
+                create_word_document(thesis, images, filename="thesis.docx")
+                yield str_state, history, "thesis.docx"
+            else:
+                yield str_state, history, None
             
         with gr.Row():
             with gr.Column(scale=1):
@@ -282,9 +309,10 @@ def create_ui_and_launch():
                 )
                 theme = gr.Textbox(label="论文主题", placeholder="请输入论文主题...")
             with gr.Column(scale=4):
-                progress_display = gr.JSON(label="进度")
+                progress_display = gr.Textbox(label="进度")
                 output_text = gr.Chatbot(label="生成内容")
                 generate_btn = gr.Button("生成论文")
+                download_btn = gr.File(label="下载论文", interactive=False)
 
         generate_btn.click(
             _infer,
@@ -297,6 +325,7 @@ def create_ui_and_launch():
             outputs=[
                 progress_display,
                 output_text,
+                download_btn,
             ],
         )
     blocks.launch()
