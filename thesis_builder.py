@@ -265,8 +265,8 @@ def create_ui_and_launch():
                 str_state = str(state)
                 str_thesis = str(thesis)
                 history.append((str_state,str_thesis))
-                yield state.name, history
-            yield state.name, history
+                yield state, history
+            yield state, history
             # return thesis, images
             
         with gr.Row():
