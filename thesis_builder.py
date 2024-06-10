@@ -1,4 +1,4 @@
-from typing import Any, Tuple, Dict
+from typing import Any, Tuple, Dict, List
 from enum import Enum
 import traceback
 import erniebot
@@ -7,6 +7,7 @@ import gradio as gr
 from docx import Document
 import requests
 from docx.shared import Inches
+import os
 
 access_token_global = None
 ak_global = None
@@ -45,7 +46,8 @@ def generate_image(description: str) -> str:
         version="v2", 
         image_num=1
     )
-    img_url = response['data']['sub_task_result_list'][0]['final_image_list'][0]['img_url']
+    img_url = response.data["sub_task_result_list"][0]["final_image_list"][0]["img_url"]
+    print(img_url)
     return img_url
 
 class STATE(Enum):
@@ -67,7 +69,7 @@ prompt_thesis_query = '''如果我想要写一篇关于{0}的论文，至少包�
 # theme section requirement extra
 prompt_detail_query = '''如果我想要写一篇关于{0}的论文，请为我生成这篇论文的{1}部分，要求如下：{2}。\
 你无需回答其它任何内容，但需要包含两个部分：\
-第一个部分是用几句话简单的说明{1}的内容，第二个部分是{1}的具体内容。\
+第一个部分是用几句话简单的说明{1}的内容，第二个部分是{1}的具体内容，第二个部分尽量详细，字数越多越好。\
 两个部分当中用"\n\n"分隔，且不需要任何提示语。\
 '''
 # theme thesis_content
@@ -86,10 +88,11 @@ prompt_detail_finetune = '''这是我写的关于{0}的论文大纲\n\n{1}\n\n\
 '''
 
 # prompt for generating images
-prompt_image_query = '''请从以下内容中找出需要图片进行佐证的地方，并为这些地方生成配图（如果没有需要配图的地方，请说明不需要配图，尽量少配图）：\n\n{0}\n\n\
+prompt_image_query = '''请从以下内容中找出需要图片进行佐证的地方，并为这些地方生成配图（若没有需要配图的地方则不需要配图，尽量少配图）：\n\n{0}\n\n\
 你无需回答其它任何内容，但需要遵循如下格式：\
-请用“\n\n”分隔每个需要图片的地方，每个地方包括一个详细的图片描述和一个图片题目，例如：“这是一个示例图片描述\n\n示例图片题目”。\
-如果不需要配图，请直接写“无需要配图”。\
+如果需要配图，请仅回答一个详细的图片描述和一个图片题目，例如：“这是一个示例图片描述\n\n示例图片题目”。\
+如果不需要配图，请仅回答“无需要配图”这5个字。\
+每个部分间请用“\n\n”分隔。\
 '''
 
 def gen_outline(theme: str) -> Tuple[STATE, Dict[str, str], Dict[str, str]]:
@@ -107,8 +110,8 @@ def gen_outline(theme: str) -> Tuple[STATE, Dict[str, str], Dict[str, str]]:
             break
     try:
         assert '摘要' in thesis_req.keys(), '摘要'
-        assert '方法' in thesis_req.keys(), '方法'
-        assert '结论' in thesis_req.keys(), '结论'
+        #assert '方法' in thesis_req.keys(), '方法'
+        #assert '结论' in thesis_req.keys(), '结论'
     except:
         return STATE.init, {}, {}
     return STATE.gen_detail, thesis_req, thesis
@@ -123,10 +126,10 @@ def gen_detail(theme: str, thesis_req: Dict[str, str]) -> Tuple[STATE, Dict[str,
             x = query(prompt_detail_query.format(theme, key, thesis_req[key]))
             results = x[0].strip().split('\n\n')
             thesis_simple[key] = results[0]
-            thesis[key] = results[1]
+            thesis[key] = " ".join(results[1:])
         except:
             pass
-    return STATE.rating, thesis, thesis_simple
+    return STATE.gen_images, thesis, thesis_simple
 
 def gen_rating(theme: str, thesis: Dict[str, str]) -> Tuple[STATE, Dict[str, str]]:
     x = query(prompt_rating_query.format(theme, ''.join([f'{k}：{v}' for k, v in thesis.items()])))
@@ -159,30 +162,33 @@ def polish(
             ))
             results = x[0].strip().split('\n\n')
             thesis_simple[key] = results[0]
-            thesis[key] = results[1]
+            thesis[key] = " ".join(results[1:])
         except:
             print(f'Ignored: {key} {value}')
     return STATE.gen_images, thesis, thesis_simple
 
-def gen_images(thesis: Dict[str, str]) -> Tuple[STATE, Dict[str, str], Dict[str, str]]:
-    images = {}
+def gen_images(thesis: Dict[str, str]) -> Tuple[STATE, Dict[str, str], List[Tuple[str, str, str]]]:
+    images = []
     for key, value in thesis.items():
-        if key == '主题' or key == '引言':
+        if key == '主题' or key == '引言' or key == '摘要' or key == '参考文献':
             continue
         try:
             x = query(prompt_image_query.format(value))
+            #print(x)
             results = x[0].strip().split('\n\n')
             image_index = 1
             i = 0
-            while i < len(results):
+            while i < len(results) - 1:
                 if results[i].strip() == "无需要配图":
                     i += 1
                     continue
-                description = results[i]
-                title = results[i + 1]
+                description = results[i].strip()
+                title = results[i + 1].strip()
+                #print('title done')
                 image_url = generate_image(description)
-                images[f'{key}_image_{image_index}'] = (title, image_url)
-                thesis[key] += f'\n\n[插图：{title}]\n'
+                #print('url done')
+                images.append((key, title, image_url))
+                #thesis[key] += f'\n\n[插图：{title}]\n'
                 image_index += 1
                 i += 2
         except:
@@ -195,7 +201,7 @@ def main_loop(theme):
     thesis_simple = {}
     thesis_req = {}
     rating = {}
-    images = {}
+    images = []
     while state != STATE.done and state != STATE.failed:
         print(state.name)
         try:
@@ -219,26 +225,39 @@ def main_loop(theme):
     return thesis, images
 
 def download_image(url, filename):
-    response = requests.get(url)
-    with open(filename, 'wb') as file:
-        file.write(response.content)
+    try:
+        '''response = requests.get(url, stream=True)
+        response.raise_for_status()
+        with open(filename, 'wb') as file:
+            for chunk in response.iter_content(1024):
+                file.write(chunk)'''
+        response = requests.get(url)
+        with open(filename, "wb") as f:
+            f.write(response.content)
+    except Exception as e:
+        print(f"Error occurred when downloading image from {url}, error message: {e}")
 
 def create_word_document(thesis, images, filename="thesis.docx"):
     doc = Document()
+    image_folder = "./images"
+    # 检查并创建图片保存的文件夹
+    if not os.path.exists(image_folder):
+        os.makedirs(image_folder)
     for key, value in thesis.items():
         doc.add_heading(key, level=1)
         paragraphs = value.split("\n\n")
         for paragraph in paragraphs:
-            if paragraph.startswith("[插图："):
-                image_title = paragraph.replace("[插图：", "").replace("]\n", "")
-                for image_key, (title, url) in images.items():
-                    if title == image_title:
-                        image_path = f"images/{image_key}.jpg"
-                        download_image(url, image_path)
-                        doc.add_picture(image_path, width=Inches(5.0))
-                        break
-            else:
-                doc.add_paragraph(paragraph)
+            doc.add_paragraph(paragraph)
+            for (image_key, title, url) in images:
+                if image_key != key:
+                    continue
+                else:
+                    image_path = os.path.join(image_folder, f"{title}.jpg")
+                    download_image(url, image_path)
+                    print(image_key, title, url)
+                    doc.add_picture(image_path, width=Inches(5.0))
+                    doc.add_paragraph(title)
+                    break
     doc.save(filename)
 
 def create_ui_and_launch():
@@ -267,34 +286,40 @@ def create_ui_and_launch():
             thesis_simple = {}
             thesis_req = {}
             rating = {}
-            images = {}
+            images = []
             while state != STATE.done and state != STATE.failed:
                 print(state.name)
+                str_state = str(state.name)
+                feedback = 'null'
                 try:
                     if state == STATE.init:
                         state = STATE.gen_outline
                     elif state == STATE.gen_outline:
                         state, thesis_req, thesis = gen_outline(theme)
+                        feedback = str(thesis_req)
                     elif state == STATE.gen_detail:
                         state, thesis, thesis_simple = gen_detail(theme, thesis_req)
+                        feedback = str(thesis)
                     elif state == STATE.rating:
                         state, rating = gen_rating(theme, thesis)
+                        feedback = str(rating)
                     elif state == STATE.polish:
                         state, thesis, thesis_simple = polish(theme, thesis, thesis_simple, rating)
+                        feedback = str(thesis)
                     elif state == STATE.gen_images:
                         state, thesis, images = gen_images(thesis)
+                        feedback = str(images)
                 except Exception as e:
                     state = STATE.failed
                     print(traceback.format_exc())
-                str_state = str(state.name)
-                str_thesis = str(thesis)
-                history.append((str_state,str_thesis))
-                yield str_state, history, None
+                history.append((str_state, feedback))
+                str_state_now = str(state.name)
+                yield str_state_now, history, None
             if state == STATE.done:
                 create_word_document(thesis, images, filename="thesis.docx")
-                yield str_state, history, "thesis.docx"
+                yield str_state_now, history, "thesis.docx"
             else:
-                yield str_state, history, None
+                yield str_state_now, history, None
             
         with gr.Row():
             with gr.Column(scale=1):
