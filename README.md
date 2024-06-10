@@ -1,4 +1,4 @@
-## AutoThesis项目（*可能更新，以代码仓库内最新版为准）
+## AutoThesis项目
 项目地址：https://github.com/Zhuozhuo313/AutoThesis
 
 最新版的Readme报告、演示视频与源代码见仓库
