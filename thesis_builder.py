@@ -129,7 +129,7 @@ def gen_detail(theme: str, thesis_req: Dict[str, str]) -> Tuple[STATE, Dict[str,
             thesis[key] = " ".join(results[1:])
         except:
             pass
-    return STATE.gen_images, thesis, thesis_simple
+    return STATE.rating, thesis, thesis_simple
 
 def gen_rating(theme: str, thesis: Dict[str, str]) -> Tuple[STATE, Dict[str, str]]:
     x = query(prompt_rating_query.format(theme, ''.join([f'{k}：{v}' for k, v in thesis.items()])))
