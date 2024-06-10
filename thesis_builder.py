@@ -47,7 +47,7 @@ def generate_image(description: str) -> str:
         image_num=1
     )
     img_url = response.data["sub_task_result_list"][0]["final_image_list"][0]["img_url"]
-    print(img_url)
+    #print(img_url)
     return img_url
 
 class STATE(Enum):
@@ -192,7 +192,7 @@ def gen_images(thesis: Dict[str, str]) -> Tuple[STATE, Dict[str, str], List[Tupl
                 image_index += 1
                 i += 2
         except:
-            print(f'Image generation failed for: {key}')
+            continue
     return STATE.done, thesis, images
 
 def main_loop(theme):
@@ -239,7 +239,7 @@ def download_image(url, filename):
 
 def create_word_document(thesis, images, filename="thesis.docx"):
     doc = Document()
-    image_folder = "./images"
+    image_folder = "./images/"
     # 检查并创建图片保存的文件夹
     if not os.path.exists(image_folder):
         os.makedirs(image_folder)
@@ -254,10 +254,9 @@ def create_word_document(thesis, images, filename="thesis.docx"):
                 else:
                     image_path = os.path.join(image_folder, f"{title}.jpg")
                     download_image(url, image_path)
-                    print(image_key, title, url)
+                    #print(image_key, title, url)
                     doc.add_picture(image_path, width=Inches(5.0))
                     doc.add_paragraph(title)
-                    break
     doc.save(filename)
 
 def create_ui_and_launch():
